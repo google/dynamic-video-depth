@@ -31,6 +31,7 @@ We provide two preprocessed video tracks from the DAVIS dataset. To download the
 
 
 ```
+bash ./scripts/download_data_and_depth_ckpt.sh
 ```
 
 This script will automatically download and unzip the checkpoints and data. If you would like to download manually 
