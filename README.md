@@ -66,6 +66,12 @@ The general work flow for preprocessing the dataset is:
 
 To be more specific, example codes are provided in `.scripts/preprocess`
 
+We provide the triangulation results [here](https://drive.google.com/file/d/1U07e9xtwYbBZPpJ2vfsLaXYMWATt4XyB/view?usp=sharing) and [here](https://drive.google.com/file/d/1om58tVKujaq1Jo_ShpKc4sWVAWBoKY6U/view?usp=sharing). You can download them in a single script by running:
+
+```
+bash ./scripts/download_triangulation_files.sh
+```
+
 ### Davis data preparation
 
 1. Download the DAVIS dataset here, and unzip it under `./datafiles`. 
