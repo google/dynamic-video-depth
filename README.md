@@ -14,15 +14,15 @@ We provide both conda and pip installations for dependencies.
 
 - To install with conda, run 
 
-`
+```
 conda create --name dynamic-video-depth --file ./dependencies/conda_packages.txt
-`
+```
 
 - To install with pip, run
 
-`
+```
 pip install -r ./dependencies/requirements.txt
-`
+```
 
 
 
