@@ -1,0 +1,1 @@
+python test.py --net {net} --dataset {dataset} --workers 4 --output_dir './test_results/{dataset}/' --epoch {epoch} --html_logger --batch_size 1 --gpu {gpu} --track_id {track_id} --suffix {suffix_expand} --checkpoint_path {full_logdir}
