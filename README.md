@@ -90,7 +90,7 @@ bash ./scripts/download_triangulation_files.sh
 
 
 
-2. Cast the videos as images, and put them under `./datafiles/shutterstock/images`, and rename them to match the file names in `./datafiles/shutterstock/triangulation`. Note that not all frames are triangulated; time stamp of valid frames are recorded in the triangulation file name.
+2. Cast the videos as images, put them under `./datafiles/shutterstock/images`, and rename them to match the file names in `./datafiles/shutterstock/triangulation`. Note that not all frames are triangulated; time stamp of valid frames are recorded in the triangulation file name.
 
 2. Run `python ./scripts/preprocess/shutterstock/generate_frame_midas.py` to pack per-frame data. 
 
