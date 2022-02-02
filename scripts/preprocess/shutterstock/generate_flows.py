@@ -107,57 +107,60 @@ def read_frame_data(key, frame_id):
         data_dict[k] = data[k]
     return data_dict
 
-
 net = load_RAFT()
 
-
-def generate_pair_data(key, frame_id_1, frame_id_2, save=True):
+def generate_pair_data(key, frame_id_1, frame_id_2_list):
     im1_data = read_frame_data(key, frame_id_1)
-    im2_data = read_frame_data(key, frame_id_2)
+    im2_data_list = [read_frame_data(key, f) for f in frame_id_2_list]
 
     im1 = im1_data['img_orig'] * 255
-    im2 = im2_data['img_orig'] * 255
-    im1 = imresize(im1, [288, 512], anti_aliasing=True)
-    im2 = imresize(im2, [288, 512], anti_aliasing=True)
+    im2_list = [i['img_orig'] * 255 for i in im2_data_list]
+    im1 = imresize(im1, (288, 512), anti_aliasing=True)
+    im2_list = [imresize(i, (288, 512), anti_aliasing=True) for i in im2_list]
 
-    images = [im1, im2]
-    images = np.array(images).transpose(0, 3, 1, 2)
-    im = torch.from_numpy(images.astype(np.float32)).cuda()
+    im1_list = [im1] * len(im2_list)
+    
+    def image_list_to_cuda_batch(im_list):
+        reorder = np.array(im_list).transpose(0, 3, 1, 2)
+        to_cuda = torch.from_numpy(reorder.astype(np.float32)).cuda()
+        return to_cuda
+
+    def cuda_batch_to_numpy_batch(cuda_batch):
+        return cuda_batch.permute(0, 2, 3, 1).cpu().numpy()
+
+    im1_batch = image_list_to_cuda_batch(im1_list)
+    im2_batch = image_list_to_cuda_batch(im2_list)
+
     with torch.no_grad():
-        flow_low, flow_up = net(image1=im[0:1, ...], image2=im[1:2, ...], iters=20, test_mode=True)
-        flow_1_2 = flow_up.squeeze().permute(1, 2, 0).cpu().numpy()
+        flow_low, flow_up = net(image1=im1_batch, image2=im2_batch, iters=20, test_mode=True)
+        flow_1_2_batch = cuda_batch_to_numpy_batch(flow_up)
+
+        flow_low, flow_up = net(image1=im2_batch, image2=im1_batch, iters=20, test_mode=True)
+        flow_2_1_batch = cuda_batch_to_numpy_batch(flow_up)
 
     H, W, _ = im1_data['img'].shape
-    flow_1_2 = resize_flow(flow_1_2, [W, H])
+    for j, frame_id_2 in enumerate(frame_id_2_list):
+        flow_1_2 = resize_flow(flow_1_2_batch[j,...], [W, H])
+        flow_2_1 = resize_flow(flow_2_1_batch[j,...], [W, H])
 
-    with torch.no_grad():
-        flow_low, flow_up = net(image1=im[1:2, ...], image2=im[0:1, ...], iters=20, test_mode=True)
-        flow_2_1 = flow_up.squeeze().permute(1, 2, 0).cpu().numpy()
-
-    flow_2_1 = resize_flow(flow_2_1, [W, H])
-
-    warp_flow_1_2 = backward_flow_warp(flow_1_2, flow_2_1)  # using latter to sample former
-    err_1 = np.linalg.norm(warp_flow_1_2 + flow_2_1, axis=-1)
-    mask_1 = np.where(err_1 > 1, 1, 0)
-    oob_mask_1 = get_oob_mask(flow_2_1)
-    mask_1 = np.clip(mask_1 + oob_mask_1, a_min=0, a_max=1)
-    warp_flow_2_1 = backward_flow_warp(flow_2_1, flow_1_2)
-    err_2 = np.linalg.norm(warp_flow_2_1 + flow_1_2, axis=-1)
-    mask_2 = np.where(err_2 > 1, 1, 0)
-    oob_mask_2 = get_oob_mask(flow_1_2)
-    mask_2 = np.clip(mask_2 + oob_mask_2, a_min=0, a_max=1)
-    save_dict = {}
-    save_dict['flow_1_2'] = flow_1_2.astype(np.float32)
-    save_dict['flow_2_1'] = flow_2_1.astype(np.float32)
-    save_dict['mask_1'] = mask_1.astype(np.uint8)
-    save_dict['mask_2'] = mask_2.astype(np.uint8)
-    save_dict['frame_id_1'] = frame_id_1
-    save_dict['frame_id_2'] = frame_id_2
-    if save:
+        warp_flow_1_2 = backward_flow_warp(flow_1_2, flow_2_1)  # using latter to sample former
+        err_1 = np.linalg.norm(warp_flow_1_2 + flow_2_1, axis=-1)
+        mask_1 = np.where(err_1 > 1, 1, 0)
+        oob_mask_1 = get_oob_mask(flow_2_1)
+        mask_1 = np.clip(mask_1 + oob_mask_1, a_min=0, a_max=1)
+        warp_flow_2_1 = backward_flow_warp(flow_2_1, flow_1_2)
+        err_2 = np.linalg.norm(warp_flow_2_1 + flow_1_2, axis=-1)
+        mask_2 = np.where(err_2 > 1, 1, 0)
+        oob_mask_2 = get_oob_mask(flow_1_2)
+        mask_2 = np.clip(mask_2 + oob_mask_2, a_min=0, a_max=1)
+        save_dict = {}
+        save_dict['flow_1_2'] = flow_1_2.astype(np.float32)
+        save_dict['flow_2_1'] = flow_2_1.astype(np.float32)
+        save_dict['mask_1'] = mask_1.astype(np.uint8)
+        save_dict['mask_2'] = mask_2.astype(np.uint8)
+        save_dict['frame_id_1'] = frame_id_1
+        save_dict['frame_id_2'] = frame_id_2
         np.savez(join(outpath, key, f'flowpair_{frame_id_1:05d}_{frame_id_2:05d}.npz'), **save_dict)
-        return 1
-    else:
-        return save_dict
 
 # %%
 
@@ -172,7 +175,8 @@ for track_id in tqdm(track_ids):
     print(key)
     l = len(sorted(glob(join(data_list_root, key, 'frame_*.npz'))))
     os.makedirs(join(outpath, track_names[track_id]), exist_ok=True)
-    gaps = [1, 2, 3, 4, 5, 6, 7, 8]
-    for g in gaps:
-        for k in tqdm(range(l - g)):
-            generate_pair_data(key, k, k + g)
+    MAX_GAP = 8
+    for k in tqdm(range(l-1)):
+        gaps = range(min(l-k-1, MAX_GAP))
+        end_frames = [k + g + 1 for g in gaps]
+        generate_pair_data(key, k, end_frames)

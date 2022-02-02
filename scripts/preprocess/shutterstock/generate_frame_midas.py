@@ -34,11 +34,12 @@ model = model.eval().cuda()
 data_list_root = "./datafiles/shutterstock/triangulation"
 image_list_root = './datafiles/shutterstock/images'
 outpath = './datafiles/shutterstock/frames_midas'
+TRIM_BAD_FRAMES = True
 
 track_paths = sorted(glob(join(data_list_root, '*')))
 
 track_names = [basename(x) for x in track_paths]
-print(track_names)
+print('Track names: ', track_names)
 track_ids = np.arange(len(track_names))
 # %% filter out valid sequences
 track_lut = {}
@@ -49,7 +50,7 @@ for tr in track_ids:
     all_files = sorted(glob(join(track_paths[tr], '*.h5')))
     ts = []
     for f in all_files:
-        ts_str = f.split('/')[-1].split('_')[2].split('.')[0]
+        ts_str = f.split('/')[-1].split('_')[-1].split('.')[0]
         ts.append(int(ts_str))
 
     idx = np.argsort(ts)
@@ -61,24 +62,26 @@ for tr in track_ids:
     grad = sorted_ts[1:] - sorted_ts[:-1]
     tracks_grad[tr] = grad
 
-valid_track_lut = {}
 for tr in track_ids:
     valid_tracks = []
     th = 40000
     g = tracks_grad[tr]
     idx = np.where(g > th)[0]
-    print(idx)
+    print('Valid indices: ', idx)
 
-valid_track_lut = {}
-for tr in track_ids:
-    valid_tracks = []
-    if tr == 0:
-        valid_tracks = track_lut[tr][14:]
-    elif tr == 3:
-        valid_tracks = track_lut[tr][:134]
-    else:
-        valid_tracks = track_lut[tr]
-    valid_track_lut[tr] = valid_tracks
+if TRIM_BAD_FRAMES:
+  valid_track_lut = {}
+  for tr in track_ids:
+      valid_tracks = []
+      if tr == 0:
+          valid_tracks = track_lut[tr][14:]
+      elif tr == 3:
+          valid_tracks = track_lut[tr][:134]
+      else:
+          valid_tracks = track_lut[tr]
+      valid_track_lut[tr] = valid_tracks
+else:
+  valid_track_lut = track_lut
 
 
 def get_im_size(im, dim_max=384, multiple=32):
@@ -106,14 +109,14 @@ def get_im_size(im, dim_max=384, multiple=32):
 for track_id in track_ids:
     frames = valid_track_lut[track_id]
 
-    hdf5_file_handels = []
+    hdf5_file_handles = []
 
     for idf, f in enumerate(frames):
-        hdf5_file_handels.append(h5py.File(f, 'r'))
-    test_in = np.array(hdf5_file_handels[0]['prediction/K'])
+        hdf5_file_handles.append(h5py.File(f, 'r'))
+    test_in = np.array(hdf5_file_handles[0]['prediction/K'])
     if len(test_in) < 3:
-        for f in hdf5_file_handels:
-            test_f = np.array(hdf5_file_handels[0]['prediction/K'])
+        for f in hdf5_file_handles:
+            test_f = np.array(hdf5_file_handles[0]['prediction/K'])
             if np.any(np.isnan(test_f)):
                 continue
             else:
@@ -128,22 +131,28 @@ for track_id in track_ids:
     depths = []
     conf = []
     mvs_depths = []
-    for x in tqdm(range(len(hdf5_file_handels))):
-        img = Image.open(hdf5_file_handels[x]['prediction'].attrs['image_path'])
-        img = np.asarray(img).astype(float) / 255
-        assert np.all(img.shape == hdf5_file_handels[x]['prediction'].attrs['image_shape'])
+    for x in tqdm(range(len(hdf5_file_handles))):
+        img = hdf5_file_handles[x]['prediction/img']
+        if not img:
+            img = Image.open(hdf5_file_handles[x]['prediction'].attrs['image_path'])
+            stored_shape = hdf5_file_handles[x]['prediction'].attrs['image_shape']
+            if not np.all(img.shape == stored_shape):
+                img = imresize(np.asarray(img), stored_shape[:2], preserve_range=True)
+            img = np.asarray(img).astype(float) / 255
+        else:
+            img = np.asarray(img) # Already a float32 array in range 0,1
 
         img_batch = torch.from_numpy(img).permute(2, 0, 1)[None, ...].float().cuda()
         with torch.no_grad():
             pred_d = model(img_batch)
             depths.append(pred_d.squeeze().cpu().numpy())
-        mvs_depth = np.array(hdf5_file_handels[x]['prediction/mvs_depth'])
+        mvs_depth = np.array(hdf5_file_handles[x]['prediction/mvs_depth'])
         mvs_depths.append(mvs_depth)
     print(img.shape)
 
     print('calculating scale')
     scales = []
-    for x in tqdm(range(len(hdf5_file_handels))):
+    for x in tqdm(range(len(hdf5_file_handles))):
         nn_depth = depths[x]
         mvs_depth = mvs_depths[x]
         idx, idy = np.where(mvs_depth > 1e-3)
@@ -153,16 +162,20 @@ for track_id in track_ids:
 
     print('saving per frame output')
 
-    for idf, h5file in tqdm(enumerate(hdf5_file_handels)):
-        img_orig = Image.open(h5file['prediction'].attrs['image_path'])
-        img_orig = np.asarray(img_orig).astype(float) / 255
+    for idf, h5file in tqdm(enumerate(hdf5_file_handles)):
+        img_orig = h5file['prediction/img']
+        if not img_orig:
+            img_orig = Image.open(h5file['prediction'].attrs['image_path'])
+            img_orig = np.asarray(img_orig).astype(float) / 255
+        else:
+            img_orig = np.asarray(img_orig) # Already a float32 array in range 0,1
 
         max_dim = 384
         multiple = 32
         H, W, _ = img_orig.shape
         target_H, target_W = get_im_size(img_orig)
 
-        img = imresize(img_orig, ([target_H, target_W]), preserve_range=True).astype(np.float32)
+        img = imresize(img_orig, ((target_H, target_W)), preserve_range=True).astype(np.float32)
 
         T_G_1 = np.array(h5file['prediction/T_1_G'])
         T_G_1[:3, 3] *= s
